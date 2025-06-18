@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-bot
+  labels:
+    app: github-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-bot
+  template:
+    metadata:
+      labels:
+        app: github-bot
+    spec:
+      containers:
+      - name: github-bot
+        image: quay.io/shanand/github-bot:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: github-bot-secrets
+              key: OPENAI_API_KEY
+        - name: TAVILY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: github-bot-secrets
+              key: TAVILY_API_KEY
+        - name: GITHUB_MCP_URL
+          valueFrom:
+            secretKeyRef:
+              name: github-bot-secrets
+              key: GITHUB_MCP_URL
