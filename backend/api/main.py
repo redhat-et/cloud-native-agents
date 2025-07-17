@@ -1,19 +1,12 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Any
 import logging
 from datetime import datetime
 
-# Autogen imports
-from autogen_agentchat.teams import RoundRobinGroupChat
-from autogen_agentchat.conditions import TextMentionTermination
-from autogen_agentchat.messages import TextMessage
-from autogen_agentchat.base import TaskResult
-
 # Import predefined models and manager
 from backend.core.agents import AgentManager, IssueRequest, IssueResponse
+from backend.core.memory import conversation_memory
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -143,6 +136,19 @@ async def analyze_issue_with_hitl_comment(websocket: WebSocket):
                 if websocket_closed:
                     logger.warning("WebSocket closed, stopping message stream")
                     break
+                # store user edited comment in memory
+                if hasattr(message, 'content') and message.content:
+                    content_str = str(message.content)
+                    if "USER EDITED COMMENT:" in content_str:
+                        user_comment = content_str.split("USER EDITED COMMENT:", 1)[1].strip()
+                        session_id = f"hitl_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        await conversation_memory.store_conversation(
+                            user_query=issue_link,
+                            agent_response=user_comment,
+                            session_id=session_id,
+                            metadata={"endpoint": "ws_issue_next_steps_with_hitl_comment", "agent": "user_proxy"}
+                        )
+                        logger.info(f"💾 Stored user edited comment in memory: {user_comment[:100]}...")
                 try:
                     await websocket.send_json(AgentManager.convert_datetime_to_string(message.model_dump()))
                 except Exception as e:

@@ -10,6 +10,10 @@ from pydantic import BaseModel
 from typing import Dict, Any, Callable, Awaitable
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import TextMentionTermination
+from datetime import datetime
+
+# Import memory functionality
+from backend.core.memory import conversation_memory
 
 # Load environment variables from .env file
 load_dotenv()
@@ -78,26 +82,40 @@ class AgentManager:
         tool_adapter_get_issue = await self._tool_adapter_get_issue_coro
         tool_adapter_add_issue_comment = await self._tool_adapter_add_issue_comment_coro
 
+        # Get ChromaDB memory for agents
+        chroma_memory = await conversation_memory.get_memory_for_agents()
+        
+        # Only use memory if it's properly initialized
+        memory_list = [chroma_memory] if chroma_memory else []
+        if not chroma_memory:
+            logger.warning("⚠️  ChromaDB memory not available - agents will run without memory")
+        else:
+            logger.info("✅ ChromaDB memory initialized successfully for agents")
+
         self.agents["issue_reader"] = AssistantAgent(
             name="issue_reader", model_client=self.model_client, tools=[tool_adapter_get_issue], reflect_on_tool_use=True,
+            memory=memory_list,
             description="Extracts structured information from a GitHub issue.",
             system_message="You are a GitHub Issue Reader. Extract key problem details, error messages, user environment, and summarize the issue using the tool_adapter_get_issue tool. "
         )
 
         self.agents["researcher"] = AssistantAgent(
             name="researcher", model_client=self.model_client, tools=[self.tavily_tool], reflect_on_tool_use=True,
+            memory=memory_list,
             description="Researches related info to assist with resolving the issue.",
             system_message="You are a web researcher. Based on the issue summary, find top 3 related GitHub issues, documentation, and known solutions using the tavily_tool. "
         )
 
         self.agents["reasoner"] = AssistantAgent(
             name="reasoner", model_client=self.model_client,
+            memory=memory_list,
             description="Draft a github comment based on the issue and related research.",
             system_message="You are a technical expert. Given a GitHub issue and related research, suggest potential root causes and actionable next steps and format it as a github comment. "
         )
 
         self.agents["commenter"] = AssistantAgent(
             name="commenter", model_client=self.model_client, tools=[tool_adapter_add_issue_comment], reflect_on_tool_use=True,
+            memory=memory_list,
             description="Writes a GitHub comment.",
             system_message="You are a GitHub commenter. If 'USER EDITED COMMENT:' is present, post user edited comment as-is. Else, post the reasoner agent's output as-is. Do not modify or paraphrase either option. After posting the comment, reply with 'TERMINATE'."
         )
@@ -124,15 +142,37 @@ class AgentManager:
             stream = team.run_stream(task=task)
             final_output = None
             async for chunk in stream:
+                chunk_content = None
                 if hasattr(chunk, 'content') and chunk.content:
-                    final_output = chunk.content
+                    chunk_content = chunk.content
                 elif hasattr(chunk, 'message') and chunk.message:
-                    final_output = chunk.message.get('content', '')
+                    chunk_content = chunk.message.get('content', '')
                 elif isinstance(chunk, dict) and 'content' in chunk:
-                    final_output = chunk['content']
+                    chunk_content = chunk['content']
                 elif isinstance(chunk, str):
-                    final_output = chunk
+                    chunk_content = chunk
+                
+                if chunk_content:
+                    if isinstance(chunk_content, str):
+                        final_output = chunk_content
+                    elif isinstance(chunk_content, list):
+                        # If it's a list, join it into a string
+                        final_output = " ".join(str(item) for item in chunk_content)
+                    else:
+                        # Convert to string for other types
+                        final_output = str(chunk_content)
+            
             await self.model_client.close()
+            
+            # Store conversation in ChromaDB memory (reasoner's response)
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            await conversation_memory.store_conversation(
+                user_query=issue_link,
+                agent_response=final_output or "Analysis completed successfully",
+                session_id=session_id,
+                metadata={"endpoint": "issue_next_steps_analysis", "agent": "reasoner"}
+            )
+            
             if final_output:
                 return {"response": final_output}
             else:
@@ -165,19 +205,50 @@ class AgentManager:
             ], max_turns=4, termination_condition=TextMentionTermination("TERMINATE"))
             task = f"Summarize and add next steps for this issue: {issue_link}"
             stream = team.run_stream(task=task)
-            final_output = None
+            
+            # Capture the commenter's actual content (not TERMINATE)
+            commenter_content = None
             async for chunk in stream:
+                chunk_content = None
                 if hasattr(chunk, 'content') and chunk.content:
-                    final_output = chunk.content
+                    chunk_content = chunk.content
                 elif hasattr(chunk, 'message') and chunk.message:
-                    final_output = chunk.message.get('content', '')
+                    chunk_content = chunk.message.get('content', '')
                 elif isinstance(chunk, dict) and 'content' in chunk:
-                    final_output = chunk['content']
+                    chunk_content = chunk['content']
                 elif isinstance(chunk, str):
-                    final_output = chunk
+                    chunk_content = chunk
+                
+                # Store the last non-TERMINATE content from commenter
+                if chunk_content:
+                    if isinstance(chunk_content, str):
+                        if chunk_content.strip() != "TERMINATE":
+                            commenter_content = chunk_content
+                    elif isinstance(chunk_content, list):
+                        # If it's a list, join it into a string
+                        chunk_str = " ".join(str(item) for item in chunk_content)
+                        if chunk_str.strip() != "TERMINATE":
+                            commenter_content = chunk_str
+                    else:
+                        # Convert to string for other types
+                        chunk_str = str(chunk_content)
+                        if chunk_str.strip() != "TERMINATE":
+                            commenter_content = chunk_str
+            
             await self.model_client.close()
-            if final_output:
-                return {"response": final_output}
+            
+            # Store conversation in ChromaDB memory (commenter's response, not TERMINATE)
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            await conversation_memory.store_conversation(
+                user_query=issue_link,
+                agent_response=commenter_content or "Comment generated and posted successfully",
+                session_id=session_id,
+                metadata={"endpoint": "issue_next_steps_with_comment", "agent": "commenter"}
+            )
+            
+            # Return the actual commenter content if captured, otherwise a success message
+            if commenter_content:
+                return {"response": commenter_content}
             else:
                 return {"response": "Comment generated and posted successfully. Check the issue for details."}
         except Exception as e:

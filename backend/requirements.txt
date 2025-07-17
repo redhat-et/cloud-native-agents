@@ -1,6 +1,7 @@
 autogen-agentchat
 autogen-core
 autogen-ext[mcp]
+autogen-ext[chromadb]
 fastapi
 uvicorn[standard]
 requests
@@ -8,5 +9,6 @@ python-dotenv
 tavily-python
 openai
 websockets
+chromadb
 grpcio>=1.67.0
 grpcio-tools>=1.67.0
