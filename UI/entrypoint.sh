@@ -8,7 +8,7 @@ set -e
 
 mkdir -p /opt/app-root/src/config
 
-cat <<EOF > /opt/app-root/src/config/config.js
+cat <<EOF > /opt/app-root/src/config/config.ts
 window.APP_CONFIG = {
   API_BASE_URL: "${API_BASE_URL}"
 };

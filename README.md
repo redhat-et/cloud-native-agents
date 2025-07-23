@@ -42,7 +42,7 @@ GITHUB_MCP_URL=https://your-mcp-server
 
 #### c. Run the backend
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8080
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
 ### 2. Frontend (UI)

@@ -13,7 +13,7 @@ from autogen_agentchat.messages import TextMessage
 from autogen_agentchat.base import TaskResult
 
 # Import predefined models and manager
-from backend.core.agents import AgentManager, IssueRequest, IssueResponse
+from core.agents import AgentManager, IssueRequest, IssueResponse
 
 # Setup logging
 logger = logging.getLogger(__name__)
