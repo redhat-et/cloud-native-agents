@@ -1,262 +1,238 @@
 #!/usr/bin/env python3
 """
-Streamlit UI for Kafka Multi-Agent System
-Integrates with Kafka topics for distributed processing using a background
-asyncio event loop for stable connections.
+Streamlit UI for Kafka Multi-Agent System with real-time, auto-updating
+workflow visualization for all 6 stages.
 """
 
 import streamlit as st
 import asyncio
 import json
-import pandas as pd
+import time
 from datetime import datetime
 import aiokafka
-from aiokafka.structs import TopicPartition # <-- IMPORT THE FIX
-from typing import Dict, Any, List
+from typing import Dict, Any
 import logging
 from threading import Thread
 from concurrent.futures import Future
+from queue import Queue, Empty
 
-# Setup logging
+# --- Basic Setup ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Page config
 st.set_page_config(
     page_title="Kafka Multi-Agent System",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# --- Real-Time Kafka Manager ---
 class KafkaManager:
     """
-    Manages a background asyncio event loop and Kafka clients for Streamlit.
+    Manages a background asyncio event loop and Kafka clients,
+    including long-running consumers for real-time updates.
     """
     def __init__(self, bootstrap_servers: str):
         self.bootstrap_servers = bootstrap_servers
         self._loop = asyncio.new_event_loop()
         self._thread = Thread(target=self._run_loop, daemon=True)
         self._producer = None
+        # Queues for each stage of the workflow for the UI to read from
+        self.message_queues = {
+            "issue-summaries": Queue(),
+            "research-findings": Queue(),
+            "drafted-comments": Queue(),
+            "approved-comments": Queue(), # Added for approval tracking
+            "completed-tasks": Queue()
+        }
         self._thread.start()
+        # Start the consumers in the background thread
+        asyncio.run_coroutine_threadsafe(self._start_consumers(), self._loop)
 
     def _run_loop(self):
-        """Runs the event loop in the background thread."""
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
     async def _get_producer(self):
-        """Initializes and returns the singleton AIOKafkaProducer."""
         if self._producer is None:
-            logger.info("Initializing Kafka producer...")
             self._producer = aiokafka.AIOKafkaProducer(
                 bootstrap_servers=self.bootstrap_servers,
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
                 key_serializer=lambda k: k.encode('utf-8') if k else None
             )
             await self._producer.start()
-            logger.info("Kafka producer initialized successfully.")
         return self._producer
 
     async def _send_message(self, topic: str, value: Dict, key: str):
-        """Coroutine to send a single message."""
         producer = await self._get_producer()
         await producer.send_and_wait(topic=topic, value=value, key=key)
-        logger.info(f"Message sent to topic '{topic}' with key '{key}'")
 
     def submit_message(self, topic: str, value: Dict, key: str) -> Future:
-        """
-        Submits a message-sending task to the event loop from an external thread.
-        """
         return asyncio.run_coroutine_threadsafe(
             self._send_message(topic, value, key), self._loop
         )
 
-    async def _fetch_messages(self, topic: str, group_id: str, max_messages: int) -> List[Dict]:
-        """Coroutine to fetch recent messages from a topic without blocking indefinitely."""
+    async def _run_consumer(self, topic: str, group_id: str, queue: Queue):
+        """A long-running consumer that puts messages into a thread-safe queue."""
         consumer = aiokafka.AIOKafkaConsumer(
             topic,
             bootstrap_servers=self.bootstrap_servers,
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
-            key_deserializer=lambda k: k.decode('utf-8') if k else None,
             group_id=group_id,
-            auto_offset_reset='earliest'
+            auto_offset_reset='latest' # Only process new messages
         )
         await consumer.start()
-        messages = []
         try:
-            partition_numbers = consumer.partitions_for_topic(topic)
-            if not partition_numbers:
-                logger.warning(f"No partitions found for topic {topic}")
-                return []
-
-            topic_partitions = [TopicPartition(topic, p) for p in partition_numbers]
-
-            end_offsets = await consumer.end_offsets(topic_partitions)
-
-            while True:
-                batch = await consumer.getmany(timeout_ms=1000)
-                if not batch:
-                    break
-                
-                for tp, msgs in batch.items():
-                    for msg in msgs:
-                        messages.append({
-                            "topic": msg.topic,
-                            "key": msg.key,
-                            "value": msg.value,
-                            "timestamp": datetime.fromtimestamp(msg.timestamp / 1000).isoformat()
-                        })
-                
-                # Define an async helper function to check all partition positions
-                async def all_partitions_at_end(consumer, partitions, offsets):
-                    for p in partitions:
-                        # await the position for each partition
-                        current_position = await consumer.position(p)
-                        if current_position < offsets[p]:
-                            return False
-                    return True
-
-                # Use the helper function in your if condition
-                if len(messages) >= max_messages or await all_partitions_at_end(consumer, topic_partitions, end_offsets):
-                    # Now this will work as expected
-                    break
-                # if len(messages) >= max_messages or all(consumer.position(p) >= end_offsets[p] for p in topic_partitions):
-                #     break
+            async for message in consumer:
+                logger.info(f"Real-time consumer got message from {topic}")
+                queue.put(message.value)
         finally:
             await consumer.stop()
-            logger.info(f"Fetched {len(messages)} messages from {topic} and stopped consumer.")
-        
-        return sorted(messages, key=lambda x: x['timestamp'], reverse=True)[:max_messages]
 
+    async def _start_consumers(self):
+        """Starts all the consumers that will run in the background."""
+        tasks = []
+        for topic, queue in self.message_queues.items():
+            group_id = f"st-dashboard-consumer-{topic}"
+            task = self._loop.create_task(self._run_consumer(topic, group_id, queue))
+            tasks.append(task)
+        logger.info("All real-time consumers have been started.")
 
-    def monitor_topic(self, topic: str, group_id: str, max_messages: int = 10) -> List[Dict]:
-        """
-        Submits a message-fetching task to the event loop.
-        Blocks until the result is available.
-        """
-        future = asyncio.run_coroutine_threadsafe(
-            self._fetch_messages(topic, group_id, max_messages), self._loop
-        )
-        return future.result(timeout=15)
+    def get_message_from_queue(self, topic: str) -> Dict | None:
+        """Non-blocking method to get a message from a queue."""
+        try:
+            return self.message_queues[topic].get_nowait()
+        except Empty:
+            return None
 
 @st.cache_resource
 def get_kafka_manager(bootstrap_servers: str) -> KafkaManager:
-    """Caches the KafkaManager instance for the Streamlit session."""
-    logger.info(f"Creating and caching new KafkaManager for {bootstrap_servers}")
     return KafkaManager(bootstrap_servers)
 
-def main():
-    st.title("Kafka Multi-Agent System")
-    st.markdown("---")
+# --- UI Rendering Functions ---
+def display_workflow_card(title: str, state: Dict):
+    """Renders a card for a single stage of the workflow."""
+    with st.container(border=True):
+        st.subheader(title)
+        st.markdown(f"**Status:** {state['status']}")
+        if state.get('content'):
+            st.json(state['content'], expanded=False)
 
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        kafka_host = st.text_input("Kafka Server", value="localhost:9092", key="kafka_host")
-        
-        try:
-            kafka_manager = get_kafka_manager(kafka_host)
-            st.success("✅ Kafka Manager is running.")
-        except Exception as e:
-            st.error(f"❌ Failed to initialize Kafka Manager: {e}")
-            st.stop()
-
-        st.subheader("📊 Topic Monitor")
-        monitor_topic = st.selectbox(
-            "Select topic to monitor",
-            ["github-issue-links", "issue-summaries", "research-findings",
-             "drafted-comments", "approved-comments", "completed-tasks"]
-        )
-
-        if st.button("Refresh Topic"):
-            with st.spinner(f"Fetching messages from {monitor_topic}..."):
-                try:
-                    group_id = f"streamlit-monitor-{monitor_topic}-{datetime.now().timestamp()}"
-                    messages = kafka_manager.monitor_topic(monitor_topic, group_id)
-                    st.session_state[f"topic_messages_{monitor_topic}"] = messages
-                    st.success(f"✅ Retrieved {len(messages)} messages.")
-                except Exception as e:
-                    st.error(f"Failed to fetch messages: {e}")
-
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.header("📋 Issue Submission")
-        st.subheader("➕ Submit New Issue")
-        new_issue = st.text_input("GitHub Issue URL", placeholder="https://github.com/owner/repo/issues/123")
-
-        if new_issue:
-            action = st.selectbox(
-                "Select Action",
-                ["analyze", "comment", "review"],
-                help="analyze: Full analysis workflow, comment: Direct comment posting, review: Analysis with human review"
+def display_review_card(kafka_manager: KafkaManager, key: str, state: Dict):
+    """Renders the special card for human-in-the-loop review."""
+    with st.container(border=True):
+        st.subheader("4. Reasoner & Human-in-the-Loop")
+        st.markdown(f"**Status:** {state['status']}")
+        draft_message = state.get('content', {})
+        with st.form(key=f"review_form_{key}"):
+            st.markdown(f"**Issue:** `{draft_message.get('issue_link')}`")
+            comment_text = st.text_area(
+                "Drafted Comment (edit if needed):",
+                value=draft_message.get("drafted_comment", ""),
+                height=250
             )
-
-            if st.button("🚀 Submit to Kafka"):
-                message = {
-                    "issue_link": new_issue,
-                    "action": action,
+            if st.form_submit_button("✅ Approve and Send"):
+                approved_message = {
+                    "issue_link": draft_message.get("issue_link"),
+                    "comment_text": comment_text,
                     "timestamp": datetime.now().isoformat(),
-                    "source": "streamlit_ui"
+                    "metadata": draft_message.get("metadata", {}),
+                    "agent": "human_reviewer_ui"
                 }
                 try:
                     future = kafka_manager.submit_message(
-                        topic="github-issue-links",
-                        value=message,
-                        key=new_issue
+                        "approved-comments",
+                        approved_message,
+                        draft_message.get("issue_link")
                     )
                     future.result(timeout=10)
-                    st.success("✅ Issue submitted to Kafka successfully!")
-
-                    if "submitted_issues" not in st.session_state:
-                        st.session_state.submitted_issues = []
-                    st.session_state.submitted_issues.append({
-                        "url": new_issue, "action": action, "timestamp": datetime.now(),
-                        "status": "submitted"
-                    })
+                    st.success("Approval sent!")
+                    st.session_state.workflows[key]['reasoner']['status'] = "✅ Approved"
+                    st.session_state.workflows[key]['approver']['status'] = "⏳ Processing..."
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Failed to submit issue to Kafka: {e}")
+                    st.error(f"Failed to send approval: {e}")
 
-    with col2:
-        st.header("📊 System Status")
-        if "submitted_issues" in st.session_state:
-            total_submitted = len(st.session_state.submitted_issues)
-            st.metric("Submitted Issues", total_submitted)
-            actions = { "analyze": 0, "comment": 0, "review": 0 }
-            for issue in st.session_state.submitted_issues:
-                action = issue["action"]
-                if action in actions:
-                    actions[action] += 1
-            for action, count in actions.items():
-                st.metric(f"{action.title()} Issues", count)
-        else:
-            st.info("No issues submitted yet.")
+# --- Main App ---
+def main():
+    st.title("🚀 Real-Time Multi-Agent Workflow")
 
-    if "submitted_issues" in st.session_state and st.session_state.submitted_issues:
-        st.header("📋 Submitted Issues Log")
-        df_data = [{
-            "URL": issue["url"], "Action": issue["action"], "Status": issue["status"],
-            "Timestamp": issue["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-        } for issue in st.session_state.submitted_issues]
-        df = pd.DataFrame(df_data)
-        st.dataframe(df, use_container_width=True)
+    if 'workflows' not in st.session_state:
+        st.session_state.workflows = {}
 
-    if f"topic_messages_{monitor_topic}" in st.session_state:
-        st.header(f"📊 Topic Inspector: {monitor_topic}")
-        messages = st.session_state[f"topic_messages_{monitor_topic}"]
-        if messages:
-            for i, msg in enumerate(messages):
-                with st.expander(f"Message {i+1} - Key: {msg['key']} @ {msg['timestamp']}"):
-                    st.json(msg["value"])
-        else:
-            st.info(f"No recent messages found in {monitor_topic}")
+    kafka_manager = get_kafka_manager("localhost:9092")
 
-    if st.sidebar.button("🗑️ Clear All Data"):
-        for key in list(st.session_state.keys()):
-            if "submitted_issues" in key or "topic_messages_" in key:
-                del st.session_state[key]
-        st.success("All session data cleared!")
-        st.rerun()
+    with st.form("submission_form"):
+        issue_link = st.text_input("Enter a GitHub Issue Link", placeholder="https://github.com/owner/repo/issues/123")
+        submitted = st.form_submit_button("Start Analysis")
+        if submitted and issue_link:
+            message = {"issue_link": issue_link, "action": "review", "timestamp": datetime.now().isoformat()}
+            st.session_state.workflows[issue_link] = {
+                "submission": {"status": "✅ Submitted to `github-issue-links`", "content": message},
+                "issue_reader": {"status": "⏳ Waiting for submission...", "content": None},
+                "researcher": {"status": "⚪ Waiting for summary...", "content": None},
+                "reasoner": {"status": "⚪ Waiting for research...", "content": None},
+                "approver": {"status": "⚪ Waiting for draft...", "content": None},
+                "commenter": {"status": "⚪ Waiting for approval...", "content": None},
+            }
+            kafka_manager.submit_message("github-issue-links", message, issue_link)
+            st.success(f"Workflow started for: {issue_link}")
+
+    st.markdown("---")
+
+    if not st.session_state.workflows:
+        st.info("Submit a GitHub issue link above to start a workflow.")
+    else:
+        # Check queues for updates from each agent
+        summary_msg = kafka_manager.get_message_from_queue("issue-summaries")
+        if summary_msg and summary_msg.get("issue_link") in st.session_state.workflows:
+            key = summary_msg["issue_link"]
+            st.session_state.workflows[key]['issue_reader'] = {"status": "✅ Done", "content": summary_msg}
+            st.session_state.workflows[key]['researcher']['status'] = "⏳ Processing..."
+
+        research_msg = kafka_manager.get_message_from_queue("research-findings")
+        if research_msg and research_msg.get("issue_link") in st.session_state.workflows:
+            key = research_msg["issue_link"]
+            st.session_state.workflows[key]['researcher'] = {"status": "✅ Done", "content": research_msg}
+            st.session_state.workflows[key]['reasoner']['status'] = "⏳ Processing..."
+
+        draft_msg = kafka_manager.get_message_from_queue("drafted-comments")
+        if draft_msg and draft_msg.get("issue_link") in st.session_state.workflows:
+            key = draft_msg["issue_link"]
+            st.session_state.workflows[key]['reasoner'] = {"status": "📝 Awaiting Review", "content": draft_msg}
+
+        approved_msg = kafka_manager.get_message_from_queue("approved-comments")
+        if approved_msg and approved_msg.get("issue_link") in st.session_state.workflows:
+            key = approved_msg["issue_link"]
+            st.session_state.workflows[key]['approver'] = {"status": "✅ Approved by Human", "content": approved_msg}
+            st.session_state.workflows[key]['commenter']['status'] = "⏳ Processing..."
+
+        completed_msg = kafka_manager.get_message_from_queue("completed-tasks")
+        if completed_msg and completed_msg.get("issue_link") in st.session_state.workflows:
+            key = completed_msg["issue_link"]
+            st.session_state.workflows[key]['commenter'] = {"status": f"✅ Done - {completed_msg.get('status')}", "content": completed_msg}
+
+        # Display the workflows in a 3x2 grid
+        for key, workflow in st.session_state.workflows.items():
+            st.subheader(f"Workflow for: `{key}`")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                display_workflow_card("1. UI Submission", workflow["submission"])
+                if workflow["reasoner"]["status"] == "📝 Awaiting Review":
+                    display_review_card(kafka_manager, key, workflow["reasoner"])
+                else:
+                    display_workflow_card("4. Reasoner", workflow["reasoner"])
+            with col2:
+                display_workflow_card("2. Issue Reader", workflow["issue_reader"])
+                display_workflow_card("5. UI Consumer (Approval)", workflow["approver"])
+            with col3:
+                display_workflow_card("3. Researcher", workflow["researcher"])
+                display_workflow_card("6. Commenter", workflow["commenter"])
+            st.markdown("---")
+
+    # Auto-refresh loop
+    time.sleep(1)
+    st.rerun()
 
 if __name__ == "__main__":
     main()

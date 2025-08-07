@@ -2,51 +2,15 @@ import json
 import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from .backend.core.agents import AgentManager
+from agents import AgentManager
 from autogen_agentchat.agents import UserProxyAgent, AssistantAgent
 from typing import Dict, Any, List
+from dotenv import load_dotenv
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-
-async def get_agent_response(agent: AssistantAgent, task: str) -> str | None:
-    """
-    Directly gets a single response from an agent for a given task.
-
-    This helper function abstracts the process of making an agent respond to a
-    single prompt without a protracted conversation.
-
-    Args:
-        agent: The AssistantAgent to perform the task.
-        task: The task description string.
-
-    Returns:
-        The content of the agent's reply, or None on failure.
-    """
-    temp_sender = UserProxyAgent(
-        name="user_proxy")
-
-    # Send the task prompt to the assistant and request a reply
-    await temp_sender.a_send(
-        message={"content": task, "role": "user"},
-        recipient=agent,
-        request_reply=True,
-        silent=True
-    )
-
-    # AssistantAgent should auto-generate a reply to the proxy
-    # Retrieve the assistant’s last message
-    last_msg = agent.last_message(sender=temp_sender)
-    if isinstance(last_msg, dict):
-        return last_msg.get("content")
-    elif isinstance(last_msg, str):
-        return last_msg
-    else:
-        return None
-
-
 
 class IssueReaderAgent:
     """
@@ -177,7 +141,6 @@ async def main():
         await agent.stop()
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-    import os
+
     load_dotenv()
     asyncio.run(main())

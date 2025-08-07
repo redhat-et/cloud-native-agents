@@ -38,7 +38,7 @@ class KafkaSystemLauncher:
     def check_topics_exist(self) -> bool:
         """Check if Kafka topics exist."""
         try:
-            # Try to create topics (this will fail if they already exist, which is fine)
+            # Try to create topics
             result = subprocess.run([
                 "/opt/homebrew/bin/kafka-topics", 
                 "--bootstrap-server", "localhost:9092",
@@ -50,7 +50,7 @@ class KafkaSystemLauncher:
     
     def create_topics(self):
         """Create Kafka topics."""
-        print("📋 Creating Kafka topics...")
+        print("Creating Kafka topics...")
         try:
             subprocess.run(["bash", "kafka_topics.sh"], check=True)
             print("✅ Kafka topics created successfully")
@@ -79,7 +79,7 @@ class KafkaSystemLauncher:
     
     def start_streamlit(self):
         """Start the Streamlit UI."""
-        print("🌐 Starting Streamlit UI...")
+        print("Starting Streamlit UI...")
         try:
             # Start Streamlit in a separate thread
             def run_streamlit():
@@ -92,15 +92,15 @@ class KafkaSystemLauncher:
             streamlit_thread = threading.Thread(target=run_streamlit, daemon=True)
             streamlit_thread.start()
             
-            print("✅ Streamlit UI started at http://localhost:8501")
+            print("Streamlit UI started at http://localhost:8501")
             return True
         except Exception as e:
-            print(f"❌ Failed to start Streamlit: {e}")
+            print(f"Failed to start Streamlit: {e}")
             return False
     
     def stop_all(self):
         """Stop all processes."""
-        print("\n🛑 Stopping all processes...")
+        print("\nStopping all processes...")
         
         # Stop agents
         for process in self.processes:
