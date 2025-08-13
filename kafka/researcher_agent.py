@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from .backend.core.agents import AgentManager
+from agents import AgentManager
 from typing import Dict, Any
 
 # Setup logging
@@ -69,12 +69,13 @@ class ResearcherAgent:
             # Extract key information for research
             title = issue_details.get("title", "")
             body = issue_details.get("body", "")
-            logger.info(f"Researching issue: {title}")
+            # logger.info(f"Researching issue: {title}")
             # Create search queries based on the issue
+
             search_queries = [
                 f"{title} GitHub issue solution",
                 f"{title} troubleshooting",
-                f"{title} similar problems"
+                f"{title} similar problems",
             ]
             
             research_results = []
@@ -84,7 +85,8 @@ class ResearcherAgent:
                 try:
                     # Use the tavily tool to search
                     summary_content = await researcher.run(task=query)
-                    research_results.append(summary_content['issue_summary'].messages[-1].content)
+                    issue_summary = summary_content.messages[-1].content
+                    research_results.append(issue_summary)
                 except Exception as e:
                     logger.error(f"Error searching for query '{query}': {e}")
             

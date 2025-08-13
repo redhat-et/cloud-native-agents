@@ -5,8 +5,6 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from agents import AgentManager
 from autogen_agentchat.agents import UserProxyAgent, AssistantAgent
 from typing import Dict, Any, List
-from dotenv import load_dotenv
-import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -83,10 +81,27 @@ class IssueReaderAgent:
             if not summary_content:
                 logger.error(f"Agent failed to produce a summary for issue: {issue_link}")
                 return None
+            
+            # extract title and bosy from the LLM response
+            tool_execution_event = summary_content.messages[2]
+            stringified_json_array = tool_execution_event.content[0].content
+            parsed_list = json.loads(stringified_json_array)
+            stringified_json_object = parsed_list[0]['text']
+            issue_detail = json.loads(stringified_json_object)
+
+            # 2. Extract the 'title' and 'body' from the final dictionary
+            title = issue_detail.get('title')
+            body = issue_detail.get('body')
+            issue_summary = summary_content.messages[-1].content
+            final_dict = {
+                "title": title,
+                "body": body,
+                "ai_summary": issue_summary
+            }
 
             output_message = {
                 "issue_link": issue_link,
-                "issue_summary": summary_content,
+                "issue_summary": final_dict,
                 "source_message": message_value,
                 "processed_by": "IssueReaderAgent"
             }
@@ -105,11 +120,11 @@ class IssueReaderAgent:
                 logger.info(f"Received message on topic '{msg.topic}': key={msg.key} value={msg.value}")
                 
                 summary_payload = await self.process_issue_link(msg.value)
-                final_summary_text = summary_payload['issue_summary'].messages[-1].content
+                # final_summary_text = summary_payload['issue_summary'].messages[-1].content
 
                 kafka_message = {
                             "issue_link": summary_payload.get("issue_link"),
-                            "issue_summary": final_summary_text,  # Use the clean string here
+                            "issue_summary": summary_payload.get('issue_summary'),  # Use the clean string here
                             "source_message": summary_payload.get("source_message"),
                             "processed_by": summary_payload.get("processed_by")
                         }
@@ -141,6 +156,7 @@ async def main():
         await agent.stop()
 
 if __name__ == "__main__":
-
+    from dotenv import load_dotenv
+    import os
     load_dotenv()
     asyncio.run(main())

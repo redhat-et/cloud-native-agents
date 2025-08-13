@@ -66,12 +66,11 @@ class CommenterAgent:
             # Use the commenter agent to post the comment
             commenter = self.agent_manager.agents["commenter"]
             
-            # Get the add_issue_comment tool
-            add_comment_tool = commenter.tools[0]  # Assuming add_issue_comment is the first tool
-            
+            prompt = f'Draft a github comment based on the issue and related research give here {comment_text}'
             # Post the comment to GitHub
-            result = await add_comment_tool.func(issue_link, comment_text)
-            
+            result = await commenter.run(task=prompt)
+            result = result.messages[-1].content
+            logger.info(f"comments written {result}")
             # Create completion message
             completion = {
                 "issue_link": issue_link,

@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from .backend.core.agents import AgentManager
+from agents import AgentManager
 from typing import Dict, Any
 
 # Setup logging
@@ -99,7 +99,7 @@ class ReasonerAgent:
             
             # Get the response from the model
             response = await reasoner.run(task=prompt)
-            drafted_comment = response['issue_summary'].messages[-1].content
+            drafted_comment = response.messages[-1].content
             
             # Create the draft comment message
             draft = {

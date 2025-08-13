@@ -45,7 +45,14 @@ class MonitorConsumer:
         print("\n" + "="*80)
         print("TASK COMPLETED")
         print("="*80)
-        print(f"Timestamp: {datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')}")
+        if isinstance(timestamp, str):
+            try:
+                print(f"Timestamp: {datetime.fromisoformat(timestamp).strftime('%Y-%m-%d %H:%M:%S')}")
+            except ValueError:
+                print(f"Timestamp: {timestamp} (Invalid ISO format)")
+        else:
+            # If no timestamp is provided, print a default message.
+            print(f"Timestamp: Not available")
         print(f"Issue: {issue_link}")
         print("-" * 80)
         print("Posted Comment:")
@@ -55,7 +62,7 @@ class MonitorConsumer:
         print(json.dumps(post_result, indent=2) if post_result else "No result data")
         print("="*80)
         
-        # Store in memory for potential reporting
+        # Store in memory for potential reporting``
         self.completed_tasks.append(completion)
 
     def get_statistics(self):
