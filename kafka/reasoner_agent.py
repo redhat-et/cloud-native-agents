@@ -4,6 +4,7 @@ import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from agents import AgentManager
 from typing import Dict, Any
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -145,7 +146,7 @@ class ReasonerAgent:
 
 async def main():
     """Main function to run the Reasoner Agent."""
-    agent = ReasonerAgent()
+    agent = ReasonerAgent(bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     try:
         await agent.start()
         await agent.run()

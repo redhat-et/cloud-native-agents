@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-system-deployment
+  labels:
+    app: kafka-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-system
+  template:
+    metadata:
+      labels:
+        app: kafka-system
+    spec:
+      initContainers:
+      - name: wait-for-kafka
+        image: busybox:1.36
+        command: ["/bin/sh","-c"]
+        args:
+        - |
+          set -e
+          hostport=$(echo "$KAFKA_BOOTSTRAP_SERVERS" | cut -d, -f1)
+          host=${hostport%:*}
+          port=${hostport##*:}
+          echo "Waiting for Kafka at ${host}:${port}..."
+          until nc -z -w 3 "$host" "$port"; do echo "Still waiting..."; sleep 5; done
+          echo "Kafka reachable. Proceeding."
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-system-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+      containers:
+      - name: kafka-system
+        image: quay.io/rh-ee-avalappi/kafka-cloud-native-agent:latest
+        imagePullPolicy: Always
+        command: ["python", "-u", "launch_kafka_container.py"]
+        args: [] # args can be empty now
+        ports:
+        - containerPort: 8501
+          name: streamlit
+        env:
+        - name: STREAMLIT_HOME
+          value: "/app/.streamlit" # Tell Streamlit to use a writable directory
+        # Secrets
+        - name: GITHUB_PAT
+          valueFrom:
+            secretKeyRef:
+              name: kafka-system-secrets
+              key: GITHUB_PAT
+        - name: GITHUB_MCP_URL
+          valueFrom:
+            secretKeyRef:
+              name: kafka-system-secrets
+              key: GITHUB_MCP_URL
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kafka-system-secrets
+              key: OPENAI_API_KEY
+        - name: TAVILY_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kafka-system-secrets
+              key: TAVILY_API_KEY
+        # ConfigMap values
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-system-config
+              key: KAFKA_BOOTSTRAP_SERVERS
+        - name: STREAMLIT_SERVER_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-system-config
+              key: STREAMLIT_SERVER_PORT
+        - name: STREAMLIT_SERVER_ADDRESS
+          valueFrom:
+            configMapKeyRef:
+              name: kafka-system-config
+              key: STREAMLIT_SERVER_ADDRESS
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        volumeMounts:
+        - name: kafka-data
+          mountPath: /kafka/data
+      volumes:
+      - name: kafka-data
+        emptyDir: {} 

@@ -2,8 +2,10 @@ import json
 import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from agents import AgentManager
+import sys
+from backend.core.agents import AgentManager
 from typing import Dict, Any
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -66,8 +68,18 @@ class CommenterAgent:
             # Use the commenter agent to post the comment
             commenter = self.agent_manager.agents["commenter"]
             
-            prompt = f'Draft a github comment based on the issue and related research give here {comment_text}'
-            # Post the comment to GitHub
+            # Build a task that ensures the tool posts ONLY the user-edited text and never the word TERMINATE.
+            prompt = (
+                f"Issue URL: {issue_link}\n"
+                "You must post exactly the following user-edited comment as-is. Do not add any prefixes or suffixes.\n"
+                "<<<COMMENT_START>>>\n"
+                f"{comment_text}\n"
+                "<<<COMMENT_END>>>\n\n"
+                "Use your add_issue_comment tool exactly once with: issue_url = the Issue URL above, and body = the text between <<<COMMENT_START>>> and <<<COMMENT_END>>>.\n"
+                "Never include the word 'TERMINATE' or the marker lines in the comment body or in any tool arguments.\n"
+                "After the tool call succeeds, send a separate assistant message containing only: TERMINATE"
+            )
+            # Post the comment to GitHub via the commenter's MCP tool
             result = await commenter.run(task=prompt)
             result = result.messages[-1].content
             logger.info(f"comments written {result}")
@@ -115,7 +127,7 @@ class CommenterAgent:
 
 async def main():
     """Main function to run the Commenter Agent."""
-    agent = CommenterAgent()
+    agent = CommenterAgent(bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     try:
         await agent.start()
         await agent.run()

@@ -4,6 +4,7 @@ import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from agents import AgentManager
 from typing import Dict, Any
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -133,7 +134,7 @@ class ResearcherAgent:
 
 async def main():
     """Main function to run the Researcher Agent."""
-    agent = ResearcherAgent()
+    agent = ResearcherAgent(bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     try:
         await agent.start()
         await agent.run()

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-system-service
+  labels:
+    app: kafka-system
+spec:
+  selector:
+    app: kafka-system
+  ports:
+    - name: streamlit
+      protocol: TCP
+      port: 80
+      targetPort: 8501
+  type: ClusterIP

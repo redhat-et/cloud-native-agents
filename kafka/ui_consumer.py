@@ -3,6 +3,7 @@ import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from typing import Dict, Any
+import os
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -119,7 +120,7 @@ class UIConsumer:
 
 async def main():
     """Main function to run the UI Consumer."""
-    consumer = UIConsumer()
+    consumer = UIConsumer(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     try:
         await consumer.start()
         await consumer.run()

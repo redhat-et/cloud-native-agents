@@ -3,6 +3,7 @@ import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer
 from typing import Dict, Any
+import os
 from datetime import datetime
 
 # Setup logging
@@ -103,7 +104,7 @@ class MonitorConsumer:
 
 async def main():
     """Main function to run the Monitor Consumer."""
-    consumer = MonitorConsumer()
+    consumer = MonitorConsumer(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     try:
         await consumer.start()
         await consumer.run()

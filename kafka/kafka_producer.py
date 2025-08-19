@@ -2,6 +2,7 @@ import json
 import asyncio
 from aiokafka import AIOKafkaProducer
 from typing import Dict, Any
+import os
 import logging
 
 # Setup logging
@@ -78,7 +79,7 @@ class KafkaProducer:
 
 # Example usage
 async def main():
-    producer = KafkaProducer()
+    producer = KafkaProducer(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
     await producer.start()
     
     # Example: Send a GitHub issue link
