@@ -2,7 +2,7 @@ import json
 import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-from agents import AgentManager
+from backend.core.agents import AgentManager
 from autogen_agentchat.agents import UserProxyAgent, AssistantAgent
 from typing import Dict, Any, List
 

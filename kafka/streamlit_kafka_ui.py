@@ -10,6 +10,7 @@ import json
 import time
 from datetime import datetime
 import aiokafka
+import os
 from typing import Dict, Any, List
 import logging
 from threading import Thread
@@ -177,7 +178,7 @@ def main():
             "commenter": {"status": "⚪ Waiting", "content": []},
         }
 
-    kafka_manager = get_kafka_manager("localhost:9092")
+    kafka_manager = get_kafka_manager(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"))
 
     # Submission Form
     with st.form("submission_form"):
