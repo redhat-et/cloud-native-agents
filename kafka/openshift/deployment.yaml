@@ -44,7 +44,7 @@ spec:
           name: streamlit
         env:
         - name: STREAMLIT_HOME
-          value: "/app/.streamlit" # Tell Streamlit to use a writable directory
+          value: "/cloud-native-agent/kafka/.streamlit" # Tell Streamlit to use a writable directory
         # Secrets
         - name: GITHUB_PAT
           valueFrom:

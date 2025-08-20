@@ -1,10 +1,17 @@
 import json
+import sys
 import asyncio
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+import os
+
+# Add the project root directory (the parent of 'kafka') to the Python path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
 from backend.core.agents import AgentManager
 from typing import Dict, Any
-import os
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
