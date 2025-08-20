@@ -1,19 +1,13 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Any
 import logging
 from datetime import datetime
 
-# Autogen imports
-from autogen_agentchat.teams import RoundRobinGroupChat
-from autogen_agentchat.conditions import TextMentionTermination
-from autogen_agentchat.messages import TextMessage
-from autogen_agentchat.base import TaskResult
-
 # Import predefined models and manager
 from backend.core.agents import AgentManager, IssueRequest, IssueResponse
+from backend.core.memory import conversation_memory
+from backend.core.utils import ConsoleWithCapture
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -129,7 +123,6 @@ async def analyze_issue_with_hitl_comment(websocket: WebSocket):
 
     try:
         data = await websocket.receive_json()
-        # Accept only dict with 'content' key
         if isinstance(data, dict) and "content" in data:
             issue_link = data["content"]
         else:
@@ -137,24 +130,22 @@ async def analyze_issue_with_hitl_comment(websocket: WebSocket):
             return
         logger.info(f"Received HITL request: {issue_link}")
         manager = AgentManager()
-        stream = await manager.hitl_team_stream(issue_link, _user_input)
-        try:
-            async for message in stream:
-                if websocket_closed:
-                    logger.warning("WebSocket closed, stopping message stream")
-                    break
-                try:
-                    await websocket.send_json(AgentManager.convert_datetime_to_string(message.model_dump()))
-                except Exception as e:
-                    logger.error(f"Error sending message to WebSocket: {str(e)}")
-                    websocket_closed = True
-                    break
-        except Exception as e:
-            logger.error(f"Error in message stream: {str(e)}")
-            await _send_error_message(f"Error in conversation: {str(e)}")
-        finally:
-            logger.info("Conversation stream completed")
-            await websocket.close()
+        stream = await manager.hitl_team_stream(issue_link, _user_input)    
+        
+        # Use ConsoleWithCapture to handle both console printing and WebSocket streaming
+        _, final_output = await ConsoleWithCapture(stream, websocket=websocket)
+        # Store human approved comment in memory if found
+        session_id = f"hitl_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        await conversation_memory.store_conversation(
+            user_query=issue_link,
+            agent_response=final_output,
+            session_id=session_id,
+            metadata={"endpoint": "ws_issue_next_steps_with_hitl_comment", "agent": "user_proxy"}
+        )
+        logger.info(f"\n💾 [MEMORY STORE] User edited comment stored in memory: {final_output[:100]}...")
+    
+        logger.info("HITL Conversation stream completed")
+        await websocket.close()
     except WebSocketDisconnect:
         logger.info("HITL WebSocket client disconnected")
         websocket_closed = True

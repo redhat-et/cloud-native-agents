@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chromadb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chromadb
+  template:
+    metadata:
+      labels:
+        app: chromadb
+    spec:
+      containers:
+        - name: chromadb
+          image: ghcr.io/chroma-core/chroma:latest
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/chroma/single_node_full.yaml
+              subPath: single_node_full.yaml
+              readOnly: true
+            - name: chroma-data
+              mountPath: /data
+      volumes:
+        - name: config-volume
+          configMap:
+            name: chromadb-config
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: chroma-pvc

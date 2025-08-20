@@ -3,13 +3,19 @@ import logging
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.tools.mcp import StreamableHttpServerParams, StreamableHttpMcpToolAdapter
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
+from autogen_agentchat.ui import Console
 from autogen_core.tools import FunctionTool
+from backend.core.utils import ConsoleWithCapture
 from tavily import AsyncTavilyClient
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Dict, Any, Callable, Awaitable
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import TextMentionTermination
+from datetime import datetime
+
+# Import memory functionality
+from backend.core.memory import conversation_memory
 
 # Load environment variables from .env file
 load_dotenv()
@@ -78,28 +84,61 @@ class AgentManager:
         tool_adapter_get_issue = await self._tool_adapter_get_issue_coro
         tool_adapter_add_issue_comment = await self._tool_adapter_add_issue_comment_coro
 
+        # Get ChromaDB memory for agents
+        chroma_memory = await conversation_memory.get_memory_for_agents()
+        
+        # Only use memory if it's properly initialized
+        memory_list = [chroma_memory] if chroma_memory else []
+        if not chroma_memory:
+            logger.warning("⚠️  ChromaDB memory not available - agents will run without memory")
+        else:
+            logger.info("✅ ChromaDB memory initialized successfully for agents")
+
         self.agents["issue_reader"] = AssistantAgent(
             name="issue_reader", model_client=self.model_client, tools=[tool_adapter_get_issue], reflect_on_tool_use=True,
+            # memory=memory_list,
             description="Extracts structured information from a GitHub issue.",
             system_message="You are a GitHub Issue Reader. Extract key problem details, error messages, user environment, and summarize the issue using the tool_adapter_get_issue tool. "
         )
 
         self.agents["researcher"] = AssistantAgent(
             name="researcher", model_client=self.model_client, tools=[self.tavily_tool], reflect_on_tool_use=True,
+            memory=memory_list,
             description="Researches related info to assist with resolving the issue.",
-            system_message="You are a web researcher. Based on the issue summary, find top 3 related GitHub issues, documentation, and known solutions using the tavily_tool. "
+            system_message="You are a researcher. Based on the issue summary, you search related information from internal memory and then find top 3 related GitHub issues, documentation, and known solutions using the tavily_tool. "
         )
 
         self.agents["reasoner"] = AssistantAgent(
             name="reasoner", model_client=self.model_client,
+            # memory=memory_list,
             description="Draft a github comment based on the issue and related research.",
-            system_message="You are a technical expert. Given a GitHub issue and related research, suggest potential root causes and actionable next steps and format it as a github comment. "
+            system_message="You are a technical expert. Given a GitHub issue and related research, suggest potential root causes and actionable next steps and format it as a github comment starting with '🤖 Agent: '."
         )
 
         self.agents["commenter"] = AssistantAgent(
             name="commenter", model_client=self.model_client, tools=[tool_adapter_add_issue_comment], reflect_on_tool_use=True,
-            description="Writes a GitHub comment.",
-            system_message="You are a GitHub commenter. If 'USER EDITED COMMENT:' is present, post user edited comment as-is. Else, post the reasoner agent's output as-is. Do not modify or paraphrase either option. After posting the comment, reply with 'TERMINATE'."
+            # memory=memory_list,
+            description="Writes an agent-generated GitHub comment.",
+            system_message = (
+                "You are a GitHub commenter. You will be given the reasoner agent's suggested GitHub comment. "
+                "You must perform exactly ONE action: post the suggested comment with ONE call to tool_adapter_add_issue_comment. "
+                "DO NOT rephrase, edit, or format the comment in any way — post it exactly as received. "
+                "DO NOT use more than one tool call. "
+                "After the tool call, your reply must contain ONLY the posted comment text — nothing else. "
+            )
+        )
+
+        self.agents["commenter_hitl"] = AssistantAgent(
+            name="commenter_hitl", model_client=self.model_client, tools=[tool_adapter_add_issue_comment], reflect_on_tool_use=True,
+            # memory=memory_list,
+            description="Writes a human approved GitHub comment.",
+            system_message= (
+                "You are a GitHub commenter. You will be given a human approved GitHub comment from the user input. "
+                "You must perform exactly ONE action: post the suggested comment with ONE call to tool_adapter_add_issue_comment. "
+                "DO NOT rephrase, edit, or format the comment in any way — post it exactly as received. "
+                "DO NOT use more than one tool call. "
+                "After the tool call, your reply must contain ONLY the posted comment text — nothing else. "
+            )
         )
 
         # Use the passed-in user_input_func if provided, else the one from self
@@ -122,17 +161,19 @@ class AgentManager:
             ], max_turns=3)
             task = f"Analyze this issue and provide detailed next steps: {issue_link}"
             stream = team.run_stream(task=task)
-            final_output = None
-            async for chunk in stream:
-                if hasattr(chunk, 'content') and chunk.content:
-                    final_output = chunk.content
-                elif hasattr(chunk, 'message') and chunk.message:
-                    final_output = chunk.message.get('content', '')
-                elif isinstance(chunk, dict) and 'content' in chunk:
-                    final_output = chunk['content']
-                elif isinstance(chunk, str):
-                    final_output = chunk
+            _, final_output = await ConsoleWithCapture(stream)
+            
             await self.model_client.close()
+            
+            # Store conversation in ChromaDB memory (reasoner's response)
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            await conversation_memory.store_conversation(
+                user_query=issue_link,
+                agent_response=final_output or "Analysis completed successfully",
+                session_id=session_id,
+                metadata={"endpoint": "issue_next_steps_analysis", "agent": "reasoner"}
+            )
+            
             if final_output:
                 return {"response": final_output}
             else:
@@ -165,19 +206,24 @@ class AgentManager:
             ], max_turns=4, termination_condition=TextMentionTermination("TERMINATE"))
             task = f"Summarize and add next steps for this issue: {issue_link}"
             stream = team.run_stream(task=task)
-            final_output = None
-            async for chunk in stream:
-                if hasattr(chunk, 'content') and chunk.content:
-                    final_output = chunk.content
-                elif hasattr(chunk, 'message') and chunk.message:
-                    final_output = chunk.message.get('content', '')
-                elif isinstance(chunk, dict) and 'content' in chunk:
-                    final_output = chunk['content']
-                elif isinstance(chunk, str):
-                    final_output = chunk
+            
+            # Capture the commenter's actual content (not TERMINATE)
+            _, commenter_content = await ConsoleWithCapture(stream)
+            
             await self.model_client.close()
-            if final_output:
-                return {"response": final_output}
+            
+            # Store conversation in ChromaDB memory (commenter's response, not TERMINATE)
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            await conversation_memory.store_conversation(
+                user_query=issue_link,
+                agent_response=commenter_content,
+                session_id=session_id,
+                metadata={"endpoint": "issue_next_steps_with_comment", "agent": "commenter"}
+            )
+            
+            # Return the actual commenter content if captured, otherwise a success message
+            if commenter_content:
+                return {"response": commenter_content}
             else:
                 return {"response": "Comment generated and posted successfully. Check the issue for details."}
         except Exception as e:
@@ -206,7 +252,7 @@ class AgentManager:
             self.agents["researcher"],
             self.agents["reasoner"],
             self.agents["user_proxy"],
-            self.agents["commenter"]
+            self.agents["commenter_hitl"]
         ], termination_condition=TextMentionTermination("TERMINATE"), max_turns=5)
         task = f"You have a team of agents, use them to read a github issue: {issue_link}, research related information, reason root causes and next steps as a github comment message, let human review it before posting. "
         return team.run_stream(task=task)
