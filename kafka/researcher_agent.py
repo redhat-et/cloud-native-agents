@@ -4,7 +4,6 @@ import asyncio
 import sys
 import logging
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
-import os
 
 # Add the project root directory (the parent of 'kafka') to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
