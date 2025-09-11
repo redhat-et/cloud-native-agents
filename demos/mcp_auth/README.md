@@ -140,3 +140,8 @@ The `get_open_prs` tool returns information about PRs that are open by the authe
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
+
+
+## Known Issues
+
+If user revokes the GitHub app authorization, the server will report that the user is not authenticated. However, attempts to re-authenticate will fail because VSCode insists on using the old invalid authorization Client ID. [The workaround](https://github.com/microsoft/vscode/issues/250960) is to run `Authentication: Remove Dynamic Authentication Providers` command in VSCode and then restart the MCP server client in VSCode and re-authenticate.
