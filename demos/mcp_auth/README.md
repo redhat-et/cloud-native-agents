@@ -119,6 +119,24 @@ The `whoami` tool returns information about the authenticated GitHub user. Examp
 }
 ```
 
+
+## Protected Tool: `get_open_prs`
+
+The `get_open_prs` tool returns information about PRs that are open by the authenticated GitHub user. Example response:
+
+```json
+{
+  "count": "1",
+  "pull_requests": [
+    {
+        "title": "feat: create a simple MCP server to query GitHub for identity",
+        "number": 21,
+        "url": "https://github.com/redhat-et/cloud-native-agents/pull/21"
+    }
+  ]
+}
+```
+
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.

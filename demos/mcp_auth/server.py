@@ -1,11 +1,11 @@
 """MCP server with Github auth."""
 
-from email.policy import default
 from typing import Any, Literal, get_args
 import click
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.github import GitHubProvider
 from fastmcp.server.dependencies import get_access_token
+from github import Github, Auth
 
 mcp = FastMCP(name="GitHub whoami MCP Server")
 
@@ -24,6 +24,35 @@ async def whoami() -> dict[str, Any]:
         "github_user": token.claims.get("login"),
         "name": token.claims.get("name"),
         "email": token.claims.get("email"),
+    }
+
+
+# Add a protected tool to test a bit more advanced usage
+@mcp.tool
+async def get_open_prs() -> dict[str, Any]:
+    """
+    Returns information about open PRs of the GitHub user.
+
+    Shows total count of open PRs and title, number and a url link for each.
+    """
+
+    token = get_access_token()
+
+    if not token:
+        return {}
+    github = Github(auth=Auth.AppAuthToken(token=token.token))
+
+    # The GitHubProvider stores user data in token claims
+
+    open_prs = github.search_issues(
+        f"type:pr author:{token.claims.get('login')} state:open"
+    )
+
+    return {
+        "count": open_prs.totalCount,
+        "pull_requests": [
+            dict(title=p.title, number=p.number, url=p.html_url) for p in open_prs
+        ],
     }
 
 
@@ -70,7 +99,7 @@ def main(
         base_url=f"http://{host}:{port}",
     )
     mcp.auth = auth_provider
-    if transport == 'stdio':
+    if transport == "stdio":
         mcp.run()
     else:
         mcp.run(transport=transport, host=host, port=port)
