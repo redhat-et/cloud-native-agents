@@ -1,0 +1,10 @@
+.env
+.DS_Store
+__pycache__/
+conversation_logs/
+logs_*/
+latest_message.json
+
+# Build artifacts
+dist/
+*.egg-info/
