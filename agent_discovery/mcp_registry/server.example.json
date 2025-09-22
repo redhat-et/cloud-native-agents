@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.<YOUR_GITHUB_USERNAME>/demo-mcp-server",
+  "description": "Demo server entry for local testing",
+  "status": "active",
+  "version": "1.0.4",
+  "repository": {
+    "url": "https://github.com/<YOUR_GITHUB_USERNAME>/demo-mcp-server",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://<YOUR_GITHUB_USERNAME>.github.io/mcp"
+    }
+  ]
+}
