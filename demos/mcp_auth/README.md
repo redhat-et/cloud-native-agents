@@ -1,6 +1,6 @@
 # GitHub Whoami MCP Server
 
-This project implements a Minimal Control Protocol (MCP) server with GitHub authentication using the `fastmcp` library. The server provides a protected tool to retrieve information about the authenticated GitHub user.
+This project implements a Model Context Protocol (MCP) server with GitHub authentication using the `fastmcp` library. The server provides a protected tool to retrieve information about the authenticated GitHub user.
 
 ## Features
 
@@ -10,32 +10,33 @@ This project implements a Minimal Control Protocol (MCP) server with GitHub auth
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
 - [UV](https://docs.astral.sh/uv/) for dependency management
 - A GitHub OAuth App with a Client ID and Client Secret
 
 ## Installation
 
 1. Clone the repository:
-    ```bash
-    git clone https://github.com/your-repo/mcp_auth.git
-    cd mcp_auth
-    ```
+
+   ```bash
+   git clone https://github.com/redhat-et/cloud-native-agents.git
+   cd demos/mcp_auth
+   ```
 
 2. Install dependencies:
-    ```bash
-    uv sync
-    source .venv/bin/activate
-    ```
+   ```bash
+   uv sync
+   source .venv/bin/activate
+   ```
 3. Create a Giuthub OAuth App:
-    1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
-    2. Click on "New OAuth App"
-    3. Choose any name
-    4. Set "Homepage URL" to `http://{host}:{port}` (later use the same `host` and `port` as you will use to run the server, default is `http://localhost:8080`)
-    5. Set "Authorization callback URL" to `http://{host}:{port}/auth/callback` (the default is `http://localhost:8080/auth/callback`)
-    6. Click "Register application"
-    7. Note down the `Client ID`
-    8. Click "Generate a new client secret" and note down the `Client Secret`
+   1. Go to [GitHub Developer Settings](https://github.com/settings/developers)
+   2. Click on "New OAuth App"
+   3. Choose any name
+   4. Set "Homepage URL" to `http://{host}:{port}` (later use the same `host` and `port` as you will use to run the server, default is `http://localhost:8080`)
+   5. Set "Authorization callback URL" to `http://{host}:{port}/auth/callback` (the default is `http://localhost:8080/auth/callback`)
+   6. Click "Register application"
+   7. Note down the `Client ID`
+   8. Click "Generate a new client secret" and note down the `Client Secret`
 
 ## Usage
 
@@ -58,54 +59,107 @@ python server.py --client_id <GITHUB_CLIENT_ID> --client_secret <GITHUB_CLIENT_S
 To run the server with HTTP transport:
 
 ```bash
+export GITHUB_CLIENT_ID=your_client_id
+export GITHUB_CLIENT_SECRET=your_client_secret
 python server.py
 ```
 
-Then connect to it
+Then connect to it:
 
-### Example VSCode Copilot
+<details>
+<summary><b>VSCode Copilot</b></summary>
 
 1. Configure the MCP server in VSCode Copilot.
-    Via UI:
+   Via UI:
 
-    1. Run command `MCP: Add Server...` in VSCode
-    2. Select `http` as the transport
-    3. Enter `http://localhost:8080/mcp` as the server URL
-    4. Name it whatever you like (e.g., `whoami`)
-    5. Select the `Workspace` scope
-    6. Select to trust the server
+   1. Run command `MCP: Add Server...` in VSCode
+   2. Select `http` as the transport
+   3. Enter `http://localhost:8080/mcp` as the server URL
+   4. Name it whatever you like (e.g., `whoami`)
+   5. Select the `Workspace` scope
+   6. Select to trust the server
 
-    Via config file:
+   Via config file:
 
-    Create file in `.vscode/mcp.json` with the following content:
-    ```json
-    {
-        "servers": {
-            "whoami": {
-                "url": "http://localhost:8080/mcp",
-                "type": "http"
-            }
-        },
-        "inputs": []
-    }
-    ```
+   Create file in `.vscode/mcp.json` with the following content:
+
+   ```json
+   {
+     "servers": {
+       "whoami": {
+         "url": "http://localhost:8080/mcp",
+         "type": "http"
+       }
+     },
+     "inputs": []
+   }
+   ```
 
 2. Use the tool
-    1. pen a new VSCode Copilot chat session and select the `Agent` mode. Make sure the new MCP server is selected in the tool selection.
 
-    2. Then ask the agent something like:
+   1. pen a new VSCode Copilot chat session and select the `Agent` mode. Make sure the new MCP server is selected in the tool selection.
 
-        ```
-        Who am I?
-        ```
-    3. The agent will ask to use the `whoami` tool. Select `Continue`
+   2. Then ask the agent something like:
 
-        ![](./screenshots/ask_to_run_tool.png)
+      ```
+      Who am I?
+      ```
 
-    4. The agent should resolve the tool and return your GitHub user information.
+   3. The agent will ask to use the `whoami` tool. Select `Continue`
 
-        ![](./screenshots/response.png)
+      ![](./screenshots/ask_to_run_tool.png)
 
+   4. The agent should resolve the tool and return your GitHub user information.
+
+      ![](./screenshots/response.png)
+
+</details>
+
+<details>
+<summary><b>Claude Code</b></summary>
+
+1. Add the MCP server to Claude Code:
+
+   ```bash
+   $ claude mcp add --transport http whoami http://localhost:8080/mcp
+
+   Added HTTP MCP server whoami with URL: http://localhost:8080/mcp to local config
+   File modified: .../.claude.json [project: ...]
+   ```
+
+2. Start a Claude Code chat session and verify the MCP server is available:
+
+   ```bash
+   $ claude
+
+   ╭──────────────────────────────────────────────────────────────────────╮
+   │ ✻ Welcome to Claude Code!                                            │
+   │                                                                      │
+   │   /help for help, /status for your current setup                     │
+   │                                                                      │
+   │   cwd: ...                                                           │
+   ╰──────────────────────────────────────────────────────────────────────╯
+
+   Tips for getting started:
+
+   Run /init to create a CLAUDE.md file with instructions for Claude
+   Use Claude to help with file analysis, editing, bash commands and git
+   Be as specific as you would with another engineer for the best results
+
+   > /mcp
+   ⎿  Authentication successful. Connected to whoami.
+
+   > whoami
+
+   ⏺ I can see you've successfully authenticated with the MCP server. Let me check your GitHub identity for you.
+   ⎿ {
+   "github_user": "octocat",
+   "name": "The Octocat",
+   … +2 lines (ctrl+r to expand)
+   ⏺ You are authenticated as The Octocat (@octocat) on GitHub.
+   ```
+
+</details>
 
 ## Protected Tool: `whoami`
 
@@ -119,7 +173,6 @@ The `whoami` tool returns information about the authenticated GitHub user. Examp
 }
 ```
 
-
 ## Protected Tool: `get_open_prs`
 
 The `get_open_prs` tool returns information about PRs that are open by the authenticated GitHub user. Example response:
@@ -129,9 +182,9 @@ The `get_open_prs` tool returns information about PRs that are open by the authe
   "count": "1",
   "pull_requests": [
     {
-        "title": "feat: create a simple MCP server to query GitHub for identity",
-        "number": 21,
-        "url": "https://github.com/redhat-et/cloud-native-agents/pull/21"
+      "title": "feat: create a simple MCP server to query GitHub for identity",
+      "number": 21,
+      "url": "https://github.com/redhat-et/cloud-native-agents/pull/21"
     }
   ]
 }
@@ -140,7 +193,6 @@ The `get_open_prs` tool returns information about PRs that are open by the authe
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
-
 
 ## Known Issues
 
