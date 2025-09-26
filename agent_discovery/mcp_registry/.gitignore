@@ -1,0 +1,14 @@
+build/
+bin/
+
+.env
+.db
+.mcpregistry*
+.DS_Store
+validate-examples
+validate-schemas
+.idea/
+coverage.out
+coverage.html
+deploy/infra/infra
+registry
